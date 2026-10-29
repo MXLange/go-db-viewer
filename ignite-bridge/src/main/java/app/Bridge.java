@@ -12,7 +12,7 @@ import java.util.*;
 /** Um processo atende uma sessão. Falhas nunca repetem comandos. */
 public final class Bridge {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int MAX_ROWS = 1000, MAX_BYTES = 8 << 20, MAX_CELL = 65536;
+    private static final int MAX_BYTES = 8 << 20, MAX_CELL = 65536;
     private Connection connection;
     private URLClassLoader loader;
 
@@ -91,17 +91,18 @@ public final class Bridge {
                 while (rows.next()) sorted.put(rows.getInt("KEY_SEQ"), quote(rows.getString("COLUMN_NAME")));
                 keys.addAll(sorted.values());
             } catch (SQLFeatureNotSupportedException ignored) { }
-            int offset = preview.path("page").asInt() * 100;
-            String sql = "SELECT * FROM " + table(node) + (keys.isEmpty() ? "" : " ORDER BY " + String.join(",", keys)) + " LIMIT 101 OFFSET " + offset;
+            int limit = rowLimit(preview);
+            long offset = (long) preview.path("page").asInt() * limit;
+            String sql = "SELECT * FROM " + table(node) + (keys.isEmpty() ? "" : " ORDER BY " + String.join(",", keys)) + " LIMIT " + (limit + 1) + " OFFSET " + offset;
             try (Statement statement = statement()) {
-                Map<String, Object> result = execute(statement, sql, 100);
+                Map<String, Object> result = execute(statement, sql, limit);
                 if (keys.isEmpty()) result.put("message", "Sem chave primária disponível. A ordem entre páginas pode variar.");
                 return Map.of("ok", true, "result", result);
             }
         }
         if (action.equals("execute")) {
             try (Statement statement = statement()) {
-                return Map.of("ok", true, "result", execute(statement, request.path("request").path("text").asText(), MAX_ROWS));
+                return Map.of("ok", true, "result", execute(statement, request.path("request").path("text").asText(), rowLimit(request.path("request"))));
             }
         }
         throw new IOException("action");
@@ -200,6 +201,13 @@ public final class Bridge {
         return output;
     }
 
+    private static int rowLimit(JsonNode request) throws SQLException {
+        int limit = request.path("rowLimit").asInt();
+        if (limit == 0) limit = 200;
+        if (limit < 1 || limit > 100000) throw new SQLException("row limit");
+        return limit;
+    }
+
     private Statement statement() throws SQLException {
         Statement statement = connection.createStatement();
         try { statement.setQueryTimeout(30); } catch (SQLFeatureNotSupportedException ignored) { }
@@ -240,19 +248,20 @@ public final class Bridge {
         Map<String, Object> result = new HashMap<>();
         List<Object> sets = new ArrayList<>();
         result.put("sets", sets); result.put("documents", List.of()); result.put("affected", "");
-        result.put("message", ""); result.put("truncated", false); result.put("hasMore", false);
+        result.put("message", ""); result.put("truncated", false); result.put("hasMore", false); result.put("rowLimit", 0); result.put("limitReason", "");
         int count = 0, bytes = 0;
         boolean hasRows = statement.execute(sql);
         for (;;) {
             if (hasRows) {
+                result.put("rowLimit", limit);
                 try (ResultSet rows = statement.getResultSet()) {
                     List<Object> output = new ArrayList<>();
                     List<Map<String, String>> cols = columns(rows.getMetaData());
                     for (Map<String, String> column : cols) bytes += 64 + 6 * (column.get("name").getBytes(StandardCharsets.UTF_8).length + column.get("type").length());
-                    if (bytes > MAX_BYTES) { result.put("truncated", true); result.put("message", "Metadados excedem o limite de tamanho."); return result; }
+                    if (bytes > MAX_BYTES) { result.put("truncated", true); result.put("limitReason", "bytes"); result.put("message", "Metadados excedem o limite de tamanho."); return result; }
                     sets.add(Map.of("columns", cols, "rows", output));
                     while (rows.next()) {
-                        if (count >= limit) { result.put("truncated", true); result.put("hasMore", true); return result; }
+                        if (count >= limit) { result.put("truncated", true); result.put("hasMore", true); result.put("limitReason", "rows"); return result; }
                         List<Object> cells = new ArrayList<>();
                         for (int i = 1; i <= cols.size(); i++) {
                             String value;
@@ -272,7 +281,7 @@ public final class Bridge {
                             }
                             cells.add(Map.of("text", value == null ? "" : value, "null", value == null, "truncated", truncated));
                         }
-                        if (bytes > MAX_BYTES) { result.put("truncated", true); result.put("message", "Limite de tamanho atingido. Use menos colunas ou registros."); return result; }
+                        if (bytes > MAX_BYTES) { result.put("truncated", true); result.put("limitReason", "bytes"); result.put("message", "Limite de tamanho atingido. Use menos colunas ou registros."); return result; }
                         output.add(cells); count++;
                     }
                 }

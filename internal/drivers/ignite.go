@@ -176,10 +176,20 @@ func (s *bridgeSession) ListTables(ctx context.Context) ([]core.TableSuggestion,
 	return r.Tables, err
 }
 func (s *bridgeSession) Preview(ctx context.Context, r core.PreviewRequest) (core.Result, error) {
+	limit, err := core.ResolveRowLimit(r.RowLimit, core.DefaultRowLimit)
+	if err != nil {
+		return core.Result{}, err
+	}
+	r.RowLimit = limit
 	result, err := s.call(ctx, bridgeRequest{Action: "preview", Preview: r})
 	return result.Result, err
 }
 func (s *bridgeSession) Execute(ctx context.Context, r core.Request) (core.Result, error) {
+	limit, err := core.ResolveRowLimit(r.RowLimit, core.DefaultRowLimit)
+	if err != nil {
+		return core.Result{}, err
+	}
+	r.RowLimit = limit
 	if err := singleStatement(r.Text); err != nil {
 		return core.Result{}, err
 	}

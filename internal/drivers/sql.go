@@ -271,6 +271,10 @@ func (s *SQLSession) primaryKeys(ctx context.Context, n core.Node) ([]string, er
 }
 
 func (s *SQLSession) Preview(ctx context.Context, req core.PreviewRequest) (core.Result, error) {
+	limit, err := core.ResolveRowLimit(req.RowLimit, core.DefaultRowLimit)
+	if err != nil {
+		return core.Result{}, err
+	}
 	if req.Node.Kind != "table" {
 		return core.Result{}, core.SafeFault("Selecione uma tabela ou view.")
 	}
@@ -282,17 +286,17 @@ func (s *SQLSession) Preview(ctx context.Context, req core.PreviewRequest) (core
 	if len(keys) > 0 {
 		order = " ORDER BY " + strings.Join(keys, ", ")
 	}
-	offset := req.Page * core.PageSize
+	offset := int64(req.Page) * int64(limit)
 	query := "SELECT * FROM " + s.table(req.Node) + order
 	if s.Kind == core.SQLServer || s.Kind == core.Oracle {
 		if order == "" && s.Kind == core.SQLServer {
 			query += " ORDER BY (SELECT NULL)"
 		}
-		query += fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, core.PageSize+1)
+		query += fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, limit+1)
 	} else {
-		query += fmt.Sprintf(" LIMIT %d OFFSET %d", core.PageSize+1, offset)
+		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit+1, offset)
 	}
-	r, err := s.query(ctx, query, core.PageSize)
+	r, err := s.query(ctx, query, limit)
 	if len(keys) == 0 {
 		r.Message = strings.TrimSpace(r.Message + " Sem chave primária disponível. A ordem entre páginas pode variar.")
 	}
@@ -300,12 +304,16 @@ func (s *SQLSession) Preview(ctx context.Context, req core.PreviewRequest) (core
 }
 
 func (s *SQLSession) Execute(ctx context.Context, req core.Request) (core.Result, error) {
+	limit, err := core.ResolveRowLimit(req.RowLimit, core.DefaultRowLimit)
+	if err != nil {
+		return core.Result{}, err
+	}
 	statement, err := analyzeStatement(req.Text, s.Kind)
 	if err != nil {
 		return core.Result{}, err
 	}
 	if statement.returnsRows {
-		return s.query(ctx, statement.text, core.MaxRows)
+		return s.query(ctx, statement.text, limit)
 	}
 	// Conn evita o retry automático de DB.ExecContext após driver.ErrBadConn.
 	r, err := s.Conn.ExecContext(ctx, statement.text)
@@ -325,7 +333,7 @@ func (s *SQLSession) query(ctx context.Context, query string, limit int, args ..
 		return core.Result{}, err
 	}
 	defer rows.Close()
-	var result core.Result
+	result := core.Result{RowLimit: limit}
 	count, size := 0, 0
 	for {
 		names, err := rows.Columns()
@@ -348,6 +356,7 @@ func (s *SQLSession) query(ctx context.Context, query string, limit int, args ..
 			if count >= limit {
 				result.Truncated = true
 				result.HasMore = true
+				result.LimitReason = "rows"
 				result.Sets = append(result.Sets, set)
 				return result, nil
 			}
@@ -366,6 +375,7 @@ func (s *SQLSession) query(ctx context.Context, query string, limit int, args ..
 			}
 			if size > core.MaxResultBytes {
 				result.Truncated = true
+				result.LimitReason = "bytes"
 				result.Message = "Limite de tamanho atingido. Use uma consulta com menos colunas ou registros."
 				result.Sets = append(result.Sets, set)
 				return result, nil

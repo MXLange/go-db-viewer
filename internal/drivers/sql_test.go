@@ -143,7 +143,7 @@ func TestEncodedSizeLimitDoesNotSkipToNextPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Truncated || r.HasMore || len(b) > core.MaxResultBytes || !rows.closed {
+	if !r.Truncated || r.HasMore || r.LimitReason != "bytes" || r.RowLimit != 100 || len(b) > core.MaxResultBytes || !rows.closed {
 		t.Fatal("limite JSON ou paginação incorreto")
 	}
 }

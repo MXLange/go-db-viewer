@@ -3,8 +3,6 @@ package core
 import "context"
 
 const (
-	MaxRows        = DefaultRowLimit
-	PageSize       = DefaultRowLimit
 	MaxCellBytes   = 65536
 	MaxResultBytes = 8 << 20
 )

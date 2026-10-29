@@ -115,16 +115,24 @@ func (s *mongoSession) Describe(ctx context.Context, n core.Node) ([]core.Column
 	return out, nil
 }
 func (s *mongoSession) Preview(ctx context.Context, req core.PreviewRequest) (core.Result, error) {
-	if req.Node.Kind != "collection" {
-		return core.Result{}, core.SafeFault("Selecione uma coleção.")
-	}
-	cursor, err := s.client.Database(req.Node.Database).Collection(req.Node.Name).Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetSkip(int64(req.Page*core.PageSize)).SetLimit(core.PageSize+1).SetBatchSize(core.PageSize+1))
+	limit, err := core.ResolveRowLimit(req.RowLimit, core.DefaultRowLimit)
 	if err != nil {
 		return core.Result{}, err
 	}
-	return mongoDocuments(ctx, cursor, core.PageSize)
+	if req.Node.Kind != "collection" {
+		return core.Result{}, core.SafeFault("Selecione uma coleção.")
+	}
+	cursor, err := s.client.Database(req.Node.Database).Collection(req.Node.Name).Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetSkip(int64(req.Page)*int64(limit)).SetLimit(int64(limit+1)).SetBatchSize(int32(limit+1)))
+	if err != nil {
+		return core.Result{}, err
+	}
+	return mongoDocuments(ctx, cursor, limit)
 }
 func (s *mongoSession) Execute(ctx context.Context, req core.Request) (core.Result, error) {
+	limit, err := core.ResolveRowLimit(req.RowLimit, core.DefaultRowLimit)
+	if err != nil {
+		return core.Result{}, err
+	}
 	if strings.TrimSpace(req.Database) == "" {
 		return core.Result{}, core.SafeFault("Selecione um banco MongoDB.")
 	}
@@ -146,7 +154,7 @@ func (s *mongoSession) Execute(ctx context.Context, req core.Request) (core.Resu
 		if err != nil {
 			return core.Result{}, err
 		}
-		return mongoDocuments(ctx, cursor, core.MaxRows)
+		return mongoDocuments(ctx, cursor, limit)
 	case "insert", "update", "delete", "findandmodify", "count", "distinct", "create", "drop", "createindexes", "dropindexes", "collstats", "dbstats", "ping":
 		var raw bson.Raw
 		if err := db.RunCommand(ctx, command).Decode(&raw); err != nil {
@@ -184,12 +192,13 @@ func mongoDocuments(ctx context.Context, cursor *mongo.Cursor, limit int) (core.
 		defer cancel()
 		_ = cursor.Close(closeCtx)
 	}()
-	r := core.Result{Documents: []string{}}
+	r := core.Result{Documents: []string{}, RowLimit: limit}
 	size := 0
 	for cursor.Next(ctx) {
 		if len(r.Documents) >= limit {
 			r.Truncated = true
 			r.HasMore = true
+			r.LimitReason = "rows"
 			break
 		}
 		text, truncated, err := mongoDocument(cursor.Current)
@@ -199,6 +208,7 @@ func mongoDocuments(ctx context.Context, cursor *mongo.Cursor, limit int) (core.
 		r.Truncated = r.Truncated || truncated
 		if size+2*len(text)+64 > core.MaxResultBytes {
 			r.Truncated = true
+			r.LimitReason = "bytes"
 			r.Message = "Limite de tamanho atingido. Use projeção ou filtros para reduzir os documentos."
 			break
 		}
