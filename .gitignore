@@ -1,0 +1,8 @@
+/build/bin/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/wailsjs/
+/ignite-bridge/**/target/
+/build/ui-validation.png
+*.log
+.DS_Store

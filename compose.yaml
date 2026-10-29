@@ -1,0 +1,111 @@
+name: go-db-viewer
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dbviewer
+      POSTGRES_USER: dbviewer
+      POSTGRES_PASSWORD: LocalDev2026
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: LocalAdmin2026
+      MONGO_INITDB_DATABASE: dbviewer
+    ports:
+      - "127.0.0.1:${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongodb7-data:/data/db
+      - mongodb7-config:/data/configdb
+      - ./docker/mongodb/init.js:/docker-entrypoint-initdb.d/01-dbviewer.js:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --host 127.0.0.1 --quiet
+          --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval 'if (db.adminCommand({ping: 1}).ok !== 1) quit(1)'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: LocalAdmin2026
+      APP_USER: dbviewer
+      APP_USER_PASSWORD: LocalDev2026
+    ports:
+      - "127.0.0.1:${ORACLE_PORT:-1521}:1521"
+    shm_size: 1g
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: LocalAdmin2026
+    ports:
+      - "127.0.0.1:${SQLSERVER_PORT:-1433}:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          SQLCMDPASSWORD="$$MSSQL_SA_PASSWORD"
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b
+          -Q "SET NOCOUNT ON; SELECT 1" -o /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    restart: "no"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      SQLCMDPASSWORD: LocalAdmin2026
+    entrypoint: ["/opt/mssql-tools18/bin/sqlcmd"]
+    command: ["-S", "sqlserver", "-U", "sa", "-C", "-b", "-i", "/init/dbviewer.sql"]
+    volumes:
+      - ./docker/sqlserver/init.sql:/init/dbviewer.sql:ro
+
+volumes:
+  postgres-data:
+  mongodb7-data:
+  mongodb7-config:
+  oracle-data:
+  sqlserver-data:

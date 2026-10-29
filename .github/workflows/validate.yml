@@ -1,0 +1,97 @@
+name: Validar
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Dependências Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev unixodbc-dev
+      - name: Resolver dependências Go
+        run: go mod tidy
+      - name: Testar Go
+        run: go test -race ./internal/...
+      - name: Compilar adaptador ODBC
+        if: runner.os == 'Linux'
+        run: go test -tags odbc ./internal/drivers
+      - name: Instalar frontend
+        run: npm ci --prefix frontend
+      - name: Testar frontend
+        run: npm test --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+      - name: Testar fechamento e salvamento final
+        run: go test -race .
+      - name: Instalar navegador de teste
+        if: runner.os == 'Linux'
+        working-directory: frontend
+        run: npx playwright-core install --with-deps chromium
+      - name: Testar interface
+        if: runner.os == 'Linux'
+        run: npm run test:ui --prefix frontend
+      - uses: actions/setup-java@v4
+        if: runner.os == 'macOS'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compilar processo Java
+        if: runner.os == 'macOS'
+        run: mvn -B -f ignite-bridge/pom.xml package
+      - name: Instalar Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: wails build -tags 'odbc,webkit2_41'
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        run: wails build
+      - name: Build macOS
+        if: runner.os == 'macOS'
+        run: |
+          wails build
+          cp ignite-bridge/target/*.jar build/bin/go-db-viewer.app/Contents/Resources/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-db-viewer-${{ matrix.os }}
+          path: build/bin/
+  integration:
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: dbviewer_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      mongo:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: --health-cmd 'mongosh --eval "db.adminCommand({ping:1})"' --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go mod tidy
+      - run: go test -count=1 -run TestIntegration -v ./internal/drivers
+        env:
+          DBVIEWER_POSTGRESQL_DSN: postgres://postgres:test-password@localhost:5432/dbviewer_test?sslmode=disable
+          DBVIEWER_MONGODB_DSN: mongodb://localhost:27017/dbviewer_test
