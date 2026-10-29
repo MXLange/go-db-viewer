@@ -135,3 +135,11 @@ Não há execução automática ao editar limites.
 2026-10-29: revisão dos tokens e estados realizada em código. Contrastes teóricos dos tokens OKLCH: texto claro 12,75:1; secundário claro 5,96:1; seleção clara 9,56:1; botão primário claro 5,04:1; seleção escura 9,03:1.
 Esses cálculos não substituem a validação do resultado renderizado.
 A execução visual no Chrome foi bloqueada pelo sandbox. Não declarar conformidade de acessibilidade com base apenas na revisão estática.
+
+2026-10-29: corrigida a seleção invisível na linha ativa do editor.
+O fundo da linha ativa usa a cor da superfície com 35% de opacidade. O número da linha mantém fundo opaco.
+Isso preserva a seleção desenhada pelo CodeMirror atrás do conteúdo, sem alterar o texto ou sua opacidade.
+A regressão visual compara pixels do mesmo trecho selecionado e sem seleção; verificar somente a cor CSS era insuficiente.
+Antes da correção, os cinco pontos amostrados tinham diferença RGB zero, apesar de SQL estar selecionado.
+Depois da correção, passaram dez cenários visuais: teclado, mouse, múltiplas linhas, Ctrl+A e perda de foco nos dois temas.
+A suíte completa da interface também passou após a liberação do ambiente de teste.

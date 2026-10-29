@@ -129,6 +129,8 @@ try {
   await page.keyboard.insertText('SELECT * FROM ')
   await editor.press('Control+Space')
   await page.locator('.cm-tooltip-autocomplete [role="option"]').first().waitFor()
+  // O CodeMirror bloqueia a aceitação nos primeiros 75 ms da lista.
+  await page.waitForTimeout(100)
   assert.equal(await page.locator('.cm-tooltip-autocomplete [role="option"]').count(), 2)
   await editor.press('Enter')
   assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'), 'SELECT * FROM "public"."clientes"')
@@ -136,6 +138,8 @@ try {
   await page.keyboard.insertText('SELECT * FROM sales.cl')
   await editor.press('Control+Space')
   await page.locator('.cm-tooltip-autocomplete [role="option"]').first().waitFor()
+  // O CodeMirror bloqueia a aceitação nos primeiros 75 ms da lista.
+  await page.waitForTimeout(100)
   await editor.press('Tab')
   assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'), 'SELECT * FROM "sales"."clientes"')
   assert.equal(await page.evaluate(() => window.catalogCalls), 1)
@@ -144,6 +148,8 @@ try {
   await page.keyboard.insertText('SELECT * FROM "public"."clientes" C\nWHERE C')
   await editor.press('.')
   await page.locator('.cm-tooltip-autocomplete [role="option"]').first().waitFor()
+  // O CodeMirror bloqueia a aceitação nos primeiros 75 ms da lista.
+  await page.waitForTimeout(100)
   assert.equal(await page.locator('.cm-tooltip-autocomplete [role="option"]').count(),2)
   await editor.press('Tab')
   assert.ok((await editor.locator('.cm-line').allTextContents()).join('\n').endsWith('C."id"'))
@@ -151,6 +157,8 @@ try {
   await page.keyboard.insertText('SELECT * FROM "public"."clientes" C\nWHERE ')
   await editor.press('Control+Space')
   await page.locator('.cm-tooltip-autocomplete [role="option"]').first().waitFor()
+  // O CodeMirror bloqueia a aceitação nos primeiros 75 ms da lista.
+  await page.waitForTimeout(100)
   await editor.press('Escape')
   const point = await editor.locator('.cm-line').first().evaluate(element => {
     const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT)
