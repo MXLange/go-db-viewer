@@ -47,3 +47,21 @@ func TestCloseWaitsForWorkspaceSave(t *testing.T) {
 		t.Fatal("fechou sem gravar a última edição")
 	}
 }
+
+func TestSettingsBindingsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	app := &App{settings: core.NewSettingsStore(path)}
+	loaded, err := app.LoadSettings()
+	if err != nil || loaded.Settings.MaxRows != 200 || loaded.Settings.Theme != "system" {
+		t.Fatal("padrão incorreto")
+	}
+	saved, err := app.SaveSettings(core.Settings{Theme: "light", MaxRows: 1000})
+	if err != nil || saved.MaxRows != 1000 {
+		t.Fatal("não salvou configurações")
+	}
+	app.settings = core.NewSettingsStore(path)
+	loaded, err = app.LoadSettings()
+	if err != nil || loaded.Settings.Theme != "light" || loaded.Settings.MaxRows != 1000 {
+		t.Fatal("não restaurou configurações")
+	}
+}

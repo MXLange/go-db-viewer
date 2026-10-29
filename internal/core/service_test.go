@@ -142,6 +142,8 @@ func (d *fakeDriver) Open(context.Context, string) (Session, error) {
 }
 
 type fakeSession struct {
+	lastRequest     Request
+	lastPreview     PreviewRequest
 	pingErr         error
 	metadataNode    Node
 	metadataRef     TableReference
@@ -158,12 +160,16 @@ func (*fakeSession) ListTables(context.Context) ([]TableSuggestion, error) {
 	return []TableSuggestion{{Schema: "public", Name: "clientes", InsertText: `"public"."clientes"`}}, nil
 }
 
-func (s *fakeSession) Ping(context.Context) error                            { return s.pingErr }
-func (*fakeSession) List(context.Context, Node) ([]Node, error)              { return nil, nil }
-func (*fakeSession) Describe(context.Context, Node) ([]Column, error)        { return nil, nil }
-func (*fakeSession) Preview(context.Context, PreviewRequest) (Result, error) { return Result{}, nil }
-func (s *fakeSession) Execute(ctx context.Context, _ Request) (Result, error) {
+func (s *fakeSession) Ping(context.Context) error                     { return s.pingErr }
+func (*fakeSession) List(context.Context, Node) ([]Node, error)       { return nil, nil }
+func (*fakeSession) Describe(context.Context, Node) ([]Column, error) { return nil, nil }
+func (s *fakeSession) Preview(_ context.Context, req PreviewRequest) (Result, error) {
+	s.lastPreview = req
+	return Result{}, nil
+}
+func (s *fakeSession) Execute(ctx context.Context, req Request) (Result, error) {
 	s.calls++
+	s.lastRequest = req
 	if s.entered != nil {
 		s.once.Do(func() { close(s.entered) })
 		<-ctx.Done()
