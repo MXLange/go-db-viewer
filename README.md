@@ -172,6 +172,60 @@ cd ..
 
 O primeiro `go mod tidy` resolve os módulos e gera `go.sum`. Ele exige acesso ao proxy Go.
 
+### Builds e pacotes com Make
+
+Na raiz do projeto, use os targets abaixo. Os artefatos ficam em `build/bin/`.
+
+```sh
+make build-exe     # Windows: .exe
+make build-deb     # Debian/Ubuntu: .deb
+make build-rpm     # Distribuições RPM: .rpm
+make build-mac     # macOS: .app e .dmg
+```
+
+| Target | Sistema de build | Artefatos |
+|---|---|---|
+| `build-exe` | Linux ou macOS | `go-db-viewer-windows-amd64.exe` |
+| `build-linux` | Linux | `go-db-viewer-linux-amd64` |
+| `build-deb` | Linux | `go-db-viewer_0.1.0-1_amd64.deb` |
+| `build-rpm` | Linux | `go-db-viewer-0.1.0-1.x86_64.rpm` |
+| `build-mac` | macOS | `go-db-viewer.app` e `go-db-viewer-darwin-<arquitetura>.dmg` |
+
+Os exemplos usam versão `0.1.0` e arquitetura `amd64`. Por padrão, `ARCH` usa a arquitetura nativa da máquina.
+Para Windows ARM64, use `make build-exe ARCH=arm64`.
+Para definir a versão dos pacotes Linux, use `make build-deb build-rpm VERSION=1.2.3`.
+Na mesma chamada, o executável Linux é compilado uma única vez para os dois pacotes.
+
+Requisitos comuns: GNU Make, Go e Node.js com npm. As versões do projeto estão na seção Desenvolvimento.
+Os targets instalam Wails `v2.15.0` e nFPM `v2.48.0` sob demanda em `build/tools/`, sem alterar o `PATH`.
+A primeira execução precisa de acesso à rede. Para instalar somente essas ferramentas, execute `make tools`.
+
+No Linux, instale as dependências nativas indicadas abaixo. Os pacotes também exigem `readelf`, disponível no pacote `binutils`.
+A compilação usa GTK3, WebKitGTK 4.1 e unixODBC. O pacote inclui o executável, o atalho no menu e este README.
+As dependências de execução e a versão mínima da glibc exigida pelo executável entram nos metadados do pacote.
+O mantenedor usa o autor do último commit Git. Para substituir, execute:
+
+```sh
+MAINTAINER='Seu nome <seu-email@exemplo.com>' make build-deb
+```
+
+Os targets Linux e macOS exigem a arquitetura nativa da máquina. Eles não fazem compilação cruzada entre arquiteturas.
+Gere os pacotes Linux na distribuição-base mais antiga que pretende suportar.
+Gerar um RPM em Debian/Ubuntu não valida sua execução em todas as distribuições RPM.
+O sistema de destino precisa oferecer as bibliotecas GTK3, WebKitGTK 4.1 e unixODBC exigidas.
+
+O `.exe` usa compilação cruzada e não exige compilador C para Windows.
+Na máquina Windows de destino, instale WebView2 e os drivers ODBC do Ignite que forem necessários.
+O executável Windows não foi validado em execução neste ambiente Linux.
+
+Para `build-mac`, use macOS com Xcode Command Line Tools, Java 17 ou superior e Maven.
+O target compila o processo JDBC, inclui os três JARs no bundle `.app` e gera um `.dmg`.
+No macOS de destino, Java 17 ou superior continua necessário para usar Ignite via JDBC.
+A imagem inclui um atalho para Applications. Arraste o aplicativo para esse diretório para instalar.
+Os artefatos não recebem assinatura digital nem notarização por esses targets.
+
+Use `make help` para consultar os comandos disponíveis.
+
 ### Linux
 
 Em Debian/Ubuntu, instale as bibliotecas nativas antes do build:
@@ -188,7 +242,7 @@ O build sem `odbc` permite desenvolver os outros bancos e informa a ausência do
 
 ### Windows
 
-Instale WebView2 e o compilador C exigido pelo Wails.
+Instale Go, Node.js e WebView2. O build Windows deste projeto dispensa CGO e compilador C.
 Instale os drivers ODBC oficiais do Ignite, com a mesma arquitetura do aplicativo.
 
 ```powershell
@@ -491,9 +545,11 @@ Oracle, SQL Server e ambas as versões Ignite exigem execução adicional com se
 - O processo Java compilou com `javac --release 17` e Jackson local.
 - A integração real permanece pendente: o sandbox bloqueou a porta PostgreSQL local e o acesso ao Docker.
 - O empacotamento Maven depende do download dos plugins e drivers JDBC.
-- O sandbox bloqueou a inicialização do Chrome. O teste visual completo permanece pendente.
+- Os testes visuais de seleção e a suíte completa da interface passaram após a liberação do ambiente.
 
-Os builds macOS e Windows precisam executar na CI ou nos respectivos sistemas.
+O executável Windows amd64 e os pacotes `.deb` e `.rpm` foram gerados no Linux com os targets Make.
+Os metadados e os arquivos dos pacotes Linux foram inspecionados.
+O bundle macOS e a execução do aplicativo Windows exigem validação nos respectivos sistemas.
 Esta implementação não declara compatibilidade validada com todos os servidores.
 
 Edição direta nas células, exportação, túnel SSH e sincronização ficam fora desta versão.

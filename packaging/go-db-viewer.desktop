@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Go DB Viewer
+Comment=Explore bancos de dados e execute consultas
+Exec=go-db-viewer
+TryExec=go-db-viewer
+Icon=applications-development
+Terminal=false
+Categories=Development;Database;
+Keywords=SQL;PostgreSQL;MongoDB;Oracle;SQLServer;Ignite;
+StartupNotify=true

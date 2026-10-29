@@ -6,3 +6,8 @@
 /build/ui-validation.png
 *.log
 .DS_Store
+/build/tools/
+/build/dmg.*/
+/build/appicon.png
+/build/windows/
+/build/darwin/
