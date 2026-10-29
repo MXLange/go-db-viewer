@@ -8,6 +8,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } })
   const failures = []
   let savedWorkspace = { version: 2, activeTabID: 0, scripts: [], openTabs: [] }
+  let savedSettings = {theme:'system',maxRows:200}
+  await page.exposeFunction('loadSettingsForTest',()=>structuredClone(savedSettings))
+  await page.exposeFunction('saveSettingsForTest',settings=>{savedSettings=structuredClone(settings);return savedSettings})
   let scriptSequence = 0
   await page.exposeFunction('loadWorkspaceForTest', () => structuredClone(savedWorkspace))
   await page.exposeFunction('saveWorkspaceForTest', state => {
@@ -42,8 +45,10 @@ try {
     window.propertyCalls = 0
     window.previewCalls = 0
     window.runtime = { EventsOnMultiple: (_name, callback) => { window.closeWorkspace = callback; return () => {} } }
-    const result = { sets: [{ columns: [{ name: 'id', type: 'BIGINT' }], rows: [[{ text: '9223372036854775807', null: false, truncated: false }]] }], documents: [], affected: '', elapsedMS: 4, truncated: false, message: '' }
+    const result = { rowLimit:200, limitReason:'', sets: [{ columns: [{ name: 'id', type: 'BIGINT' }], rows: [[{ text: '9223372036854775807', null: false, truncated: false }]] }], documents: [], affected: '', elapsedMS: 4, truncated: false, message: '' }
     window.go = { main: { App: {
+      LoadSettings: async()=>({settings:await window.loadSettingsForTest(),warning:''}),
+      SaveSettings: async settings=>{if(window.failSettingsSave)throw new Error('Falha controlada nas configurações.');const result=await window.saveSettingsForTest(settings);window.lastSettings=result;return result},
       SaveScript: async script => { if (window.failScriptSave) throw new Error('Falha controlada ao salvar.'); return window.saveScriptForTest(script) },
       RenameScript: async (id,title) => window.renameScriptForTest({id,title}),
       DeleteScript: async id => window.deleteScriptForTest(id),
@@ -74,12 +79,16 @@ try {
         return {table:node,columns:{...empty,columns:['Coluna','Tipo'],rows:[[cell('id'),cell('BIGINT')]]},primaryKey:empty,foreignKeys:{...empty,status:'unsupported',message:'O driver não expõe estes metadados.'},indexes:empty}
       },
       Describe: async () => [{ name: 'id', type: 'BIGINT', insertText:'"id"' }, {name:'nome',type:'TEXT',insertText:'"nome"'}],
-      Preview: async () => { window.previewCalls++; return structuredClone(result) },
+      Preview: async (_id,req) => { window.previewCalls++;window.lastPreview=req;return {...structuredClone(result),rowLimit:req.rowLimit||200} },
       Execute: async (_id, query) => {
         window.lastQuery = query
         window.executedQueries.push(query)
         if (query.text.includes('falha')) throw new Error('Falha controlada de execução.')
-        return /^INSERT/i.test(query.text) ? { ...result, sets: [], affected: '7', message: 'Comando concluído.' } : structuredClone(result)
+        if(query.text==='SELECT many') {
+          const limit=query.rowLimit||200
+          return {...structuredClone(result),rowLimit:limit,truncated:true,hasMore:true,limitReason:'rows',sets:[{columns:[{name:'id',type:'INT'}],rows:Array.from({length:limit},(_,i)=>[{text:String(i+1),null:false,truncated:false}])}]}
+        }
+        return /^INSERT/i.test(query.text) ? { ...result, rowLimit:0, sets: [], affected: '7', message: 'Comando concluído.' } : {...structuredClone(result),rowLimit:query.rowLimit||200}
       },
     } } }
   })
@@ -283,6 +292,79 @@ try {
   assert.equal(await page.locator('.tab').count(),1)
   assert.equal(await editor.getAttribute('aria-readonly'),'false')
   await page.getByRole('button',{name:'Vincular conexão',exact:true}).waitFor()
+  // Limites por aba, configurações e temas não executam comandos automaticamente.
+  await page.getByRole('button',{name:'Nova conexão'}).click()
+  await page.getByRole('textbox',{name:'Nome da conexão'}).fill('Teste de limites')
+  await page.locator('#dsn').fill('postgresql://user:secret@localhost/db')
+  await page.getByRole('button',{name:'Conectar sem salvar',exact:true}).click()
+  await editor.waitFor();await editor.focus();await editor.press(`${modifier}+a`);await page.keyboard.insertText('SELECT many')
+  await editor.press(`${modifier}+Enter`)
+  await page.getByText('200/200 máx',{exact:true}).waitFor()
+  const limitInput=page.getByRole('textbox',{name:'Máximo nesta aba',exact:true})
+  await limitInput.fill('/1000');await limitInput.press('Enter')
+  assert.equal(await page.evaluate(()=>window.executedQueries.length),1)
+  await page.getByText('Novo limite na próxima execução.',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'Configurações',exact:true}).click()
+  const settingsView=page.getByRole('region',{name:'Configurações',exact:true})
+  const themeSelect=settingsView.getByRole('combobox',{name:'Tema',exact:true})
+  await themeSelect.selectOption('light')
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='light'&&window.lastSettings?.theme==='light')
+  const defaultLimit=settingsView.getByRole('textbox',{name:'Máximo de linhas/itens',exact:true})
+  await defaultLimit.fill('0');await defaultLimit.press('Enter')
+  await settingsView.getByText('Informe um limite inteiro entre 1 e 100.000.',{exact:true}).waitFor()
+  assert.equal(savedSettings.maxRows,200)
+  await page.evaluate(()=>window.failSettingsSave=true)
+  await defaultLimit.fill('500');await defaultLimit.press('Enter')
+  await settingsView.getByText('Falha controlada nas configurações.',{exact:true}).waitFor()
+  assert.equal(savedSettings.maxRows,200)
+  await page.evaluate(()=>window.failSettingsSave=false)
+  await settingsView.getByRole('button',{name:'Tentar novamente',exact:true}).click()
+  await page.waitForFunction(()=>window.lastSettings?.maxRows===500)
+  await page.getByRole('button',{name:'Workspace',exact:true}).click()
+  assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'),'SELECT many')
+  assert.equal(await limitInput.inputValue(),'1000')
+  assert.equal(await page.evaluate(()=>window.executedQueries.length),1)
+  await editor.focus();await editor.press(`${modifier}+Enter`)
+  await page.getByText('1000/1000 máx',{exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>window.lastQuery.rowLimit),1000)
+  await editor.press(`${modifier}+a`)
+  await page.locator('.cm-selectionBackground').first().waitFor()
+  const lightSelection=await page.locator('.cm-selectionBackground').first().evaluate(el=>getComputedStyle(el).backgroundColor)
+  assert.notEqual(lightSelection,'rgb(255, 255, 255)')
+  await page.getByRole('button',{name:'Configurações',exact:true}).click()
+  await page.emulateMedia({colorScheme:'dark'})
+  assert.equal(await page.evaluate(()=>document.documentElement.dataset.theme),'light')
+  await themeSelect.selectOption('system')
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark')
+  await page.emulateMedia({colorScheme:'light'})
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='light')
+  await themeSelect.selectOption('dark')
+  await page.waitForFunction(()=>window.lastSettings?.theme==='dark')
+  await page.getByRole('button',{name:'Workspace',exact:true}).click()
+  const darkSelection=await page.locator('.cm-selectionBackground').first().evaluate(el=>getComputedStyle(el).backgroundColor)
+  assert.notEqual(darkSelection,lightSelection)
+  // Outra aba usa o padrão; alterar uma página reinicia a carga na página zero.
+  await page.getByRole('treeitem',{name:'banco'}).click()
+  await page.getByRole('treeitem',{name:'public schema'}).click()
+  await page.getByRole('treeitem',{name:'clientes'}).click()
+  await page.getByText('1/500',{exact:true}).waitFor()
+  await limitInput.fill('1000');await limitInput.press('Enter')
+  const previewsBefore=await page.evaluate(()=>window.previewCalls)
+  assert.equal(await page.evaluate(()=>window.lastPreview.rowLimit),500)
+  await page.getByRole('button',{name:'Atualizar dados',exact:true}).click()
+  await page.getByText('1/1000',{exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>window.previewCalls),previewsBefore+1)
+  assert.equal(await page.evaluate(()=>window.lastPreview.page),0)
+  await page.getByRole('button',{name:'Fechar public.clientes',exact:true}).click()
+  await page.getByRole('button',{name:'Fechar Nova consulta',exact:true}).click()
+  await changesDialog.getByRole('button',{name:'Descartar alterações',exact:true}).click()
+  await page.getByRole('button',{name:'Nova consulta',exact:true}).click()
+  assert.equal(await limitInput.inputValue(),'500')
+  await page.getByRole('button',{name:'Fechar Nova consulta',exact:true}).click()
+  await page.reload();await editor.waitFor()
+  assert.equal(await page.evaluate(()=>document.documentElement.dataset.theme),'dark')
+  assert.equal(await limitInput.inputValue(),'500')
+  assert.equal((await editor.locator('.cm-line').allTextContents()).join('\n'),persistedText)
   await page.getByRole('button',{name:'Abrir script',exact:true}).click()
   await libraryDialog.getByRole('button',{name:'Excluir Clientes salvos',exact:true}).click()
   const removeDialog=page.getByRole('dialog',{name:'Excluir script?',exact:true})
@@ -299,7 +381,7 @@ try {
   const screenshot = process.env.UI_SCREENSHOT || path.join(path.dirname(fileURLToPath(import.meta.url)), '../../build/ui-validation.png')
   await page.screenshot({ path: screenshot })
   assert.deepEqual(failures, [])
-  console.log('UI validada: conexões, execução, autocomplete, biblioteca, salvamento manual e fechamento com alterações.')
+  console.log('UI validada: conexões, execução, autocomplete, biblioteca, salvamento manual, limites por aba e temas persistentes.')
 } finally {
   await browser.close()
 }

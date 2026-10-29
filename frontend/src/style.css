@@ -5,7 +5,7 @@
   --raised:#202a3c;--raised:oklch(28.4% .036 262);--fg:#e5e7eb;--fg:oklch(92.8% .006 264.5);
   --muted:#a3b0c2;--muted:oklch(75% .03 257);--border:#334155;--border:oklch(37.2% .044 257.3);
   --accent:#14b8a6;--accent:oklch(70.4% .14 182.5);--accent-fg:#05201d;--accent-fg:oklch(22% .035 181);
-  --selection:#12313d;--selection:oklch(29% .04 226);--success:#5eead4;--success:oklch(85.5% .138 181);
+  --selection:#23404a;--selection:oklch(35% .04 222);--success:#5eead4;--success:oklch(85.5% .138 181);
   --warning:#fde68a;--warning:oklch(92.4% .12 95.7);--error:#fca5a5;--error:oklch(80.8% .114 19.5);
   --space:4px;--r:4px;--r-dialog:8px;--fast:120ms;--ease:cubic-bezier(.2,0,0,1);
   font-family:var(--font-body);font-size:14px;color:var(--fg);background:var(--bg);color-scheme:dark;
@@ -27,3 +27,30 @@ dialog{background:var(--surface);color:var(--fg);border:1px solid var(--border);
 .query-context { flex-wrap: wrap; }
 #script-name { display: block; width: 100%; margin-top: 8px; }
 @media (max-width:1080px) { .editor-actions > [role="status"] { flex-basis: 100%; text-align: right; } }
+
+:root { --selection-match:#1b333d;--selection-match:oklch(30% .03 222); }
+:root[data-theme="dark"] { color-scheme:dark; }
+:root[data-theme="light"] {
+  --bg:#f6f8fa;--bg:oklch(97.8% .004 248);
+  --surface:#ffffff;--surface:oklch(100% 0 0);
+  --raised:#eaf0f3;--raised:oklch(95% .009 232);
+  --fg:#20303a;--fg:oklch(30% .024 239);
+  --muted:#536774;--muted:oklch(50% .027 237);
+  --border:#81949f;--border:oklch(65% .025 237);
+  --accent:#087e73;--accent:oklch(53% .09 183);
+  --accent-fg:#ffffff;--accent-fg:oklch(100% 0 0);
+  --selection:#c5dfdf;--selection:oklch(88% .028 195);
+  --selection-match:#e1eeee;--selection-match:oklch(94% .015 195);
+  --success:#066c5f;--success:oklch(47% .08 179);
+  --warning:#815400;--warning:oklch(48% .1 74);
+  --error:#b42335;--error:oklch(49% .17 19);
+  color-scheme:light;
+}
+::selection { background:var(--selection); color:var(--fg); }
+.primary-tabs { display:flex; gap:4px; min-height:44px; padding:0 20px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+.primary-tabs button { padding:10px 16px; color:var(--muted); border-radius:0; border-bottom:2px solid transparent; }
+.primary-tabs button[aria-current="page"] { color:var(--fg); border-bottom-color:var(--accent); }
+.primary-tabs button:hover { background:var(--raised); }
+.workspace-panel { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; overflow:hidden; }
+
+:root[data-theme="light"] .primary:not(:disabled):hover { filter:brightness(.94); }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { api, errorMessage, isDesktop, onWorkspaceClose, rootNode, type Column, type ConnectionInput, type DBNode, type DriverInfo, type Kind, type Profile, type Result, type ScriptTab, type TableReference, type TableProperties, type SavedScript, type WorkspaceState } from './api'
+import { api, errorMessage, isDesktop, onWorkspaceClose, rootNode, type Column, type ConnectionInput, type DBNode, type DriverInfo, type Kind, type Profile, type Result, type ScriptTab, type TableReference, type TableProperties, type SavedScript, type WorkspaceState, type Settings } from './api'
 import { applyResult, disconnectTabs } from './tabs.mjs'
 import { createWorkspaceSaver, serializeWorkspace, restoreWorkspace, scriptDirty, scriptSnapshot } from './workspace.mjs'
 import { createTableCatalog, createMetadataCatalog } from './catalog.mjs'
@@ -9,9 +9,18 @@ import TreeNode from './components/TreeNode.vue'
 import ResultView from './components/ResultView.vue'
 import PropertiesView from './components/PropertiesView.vue'
 import ScriptLibrary from './components/ScriptLibrary.vue'
+import SettingsView from './components/SettingsView.vue'
+import ResultLimit from './components/ResultLimit.vue'
+import { defaultSettings, effectiveRowLimit, previewPage, effectiveTheme, applyTheme } from './settings.mjs'
 
 interface Connection { sessionID: string; profileID: string; name: string; kind: Kind; database: string; roots: DBNode[]; treeError: string; loading: boolean }
-interface Tab extends ScriptTab { saving?: boolean; scriptError?: string; propertiesView?: boolean; properties?: TableProperties; metadataVersion?: number; sessionID: string; node?: DBNode; page: number; result?: Result; columns: Column[]; busy: boolean; error: string; disconnected: boolean }
+interface Tab extends ScriptTab { rowLimit?: number; saving?: boolean; scriptError?: string; propertiesView?: boolean; properties?: TableProperties; metadataVersion?: number; sessionID: string; node?: DBNode; page: number; result?: Result; columns: Column[]; busy: boolean; error: string; disconnected: boolean }
+const page = ref<'workspace' | 'settings'>('workspace')
+const settings = ref<Settings>(defaultSettings()), settingsReady = ref(false), settingsStatus = ref('Carregando configurações'), settingsError = ref('')
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)'), systemDark = ref(systemTheme.matches)
+const theme = computed(() => effectiveTheme(settings.value.theme, systemDark.value))
+watch(theme, value => applyTheme(value), { immediate: true })
+function systemThemeChanged(event: MediaQueryListEvent) { systemDark.value = event.matches }
 const drivers = ref<DriverInfo[]>([]), profiles = ref<Profile[]>([]), connections = ref<Connection[]>([]), tabs = ref<Tab[]>([])
 const scripts = ref<SavedScript[]>([]), libraryDialog = ref<HTMLDialogElement>(), libraryProfileID = ref('$all'), libraryVersion = ref(0)
 const nameDialog = ref<HTMLDialogElement>(), nameValue = ref(''), nameError = ref(''), nameBusy = ref(false)
@@ -33,7 +42,7 @@ const formDriver = computed(() => drivers.value.find(d => d.kind === form.kind))
 const active = computed(() => tabs.value.find(t => t.id === activeTabID.value))
 const selected = computed(() => connections.value.find(c => c.sessionID === selectedSession.value))
 const filteredProfiles = computed(() => profiles.value.filter(p => p.name.toLowerCase().includes(filter.value.toLowerCase())))
-const totalRows = computed(() => active.value?.result?.documents?.length || active.value?.result?.sets?.reduce((sum, set) => sum + set.rows.length, 0) || 0)
+
 let nextID = 1, lastFocus: HTMLElement | null = null
 let initialization: Promise<void> = Promise.resolve(), unsubscribeClose = () => {}
 const catalog = createTableCatalog((id: string) => api.ListTables(id))
@@ -46,6 +55,32 @@ const saver = createWorkspaceSaver((workspace: WorkspaceState) => api.SaveWorksp
   if (error) saveError.value = errorMessage(error)
   else if (status === 'Salvo') saveError.value = ''
 })
+const settingsSaver = createWorkspaceSaver((value: Settings) => api.SaveSettings(value), (status: string, error?: unknown) => {
+  settingsStatus.value = status
+  settingsError.value = error ? errorMessage(error) : ''
+}, { delay: 0 })
+async function loadSettings() {
+  try {
+    const loaded = await api.LoadSettings()
+    settings.value = loaded.settings; settingsReady.value = true; settingsStatus.value = 'Salvo'; settingsError.value = ''
+    if (loaded.warning) announce(loaded.warning, true)
+  } catch (error) { settingsStatus.value = 'Falha ao carregar'; settingsError.value = errorMessage(error) }
+}
+function changeSettings(value: Settings) {
+  if (!settingsReady.value) return
+  settings.value = value; settingsSaver.schedule(value)
+}
+async function retrySettings() {
+  if (!settingsReady.value) { await loadSettings(); return }
+  settingsSaver.schedule({ ...settings.value })
+  try { await settingsSaver.flush() } catch { /* O status mantém o erro visível. */ }
+}
+const rowLimit = (tab: Tab) => effectiveRowLimit(tab, settings.value)
+function resultNote(result: Result) {
+  if (!result.truncated) return result.message
+  const reason = result.limitReason === 'rows' ? 'Limite de linhas/itens atingido.' : result.limitReason === 'bytes' ? 'Limite de tamanho atingido.' : 'Um ou mais valores foram truncados.'
+  return [reason, result.message].filter(Boolean).join(' ')
+}
 watch(() => serializeWorkspace(tabs.value, activeTabID.value), snapshot => {
   if (workspaceReady.value && !closing.value) saver.schedule(snapshot)
 }, { flush: 'sync' })
@@ -76,6 +111,7 @@ async function saveBeforeClose() {
   closeRequested.value = true
   try {
     await initialization
+    await settingsSaver.flush()
     if (!workspaceReady.value) throw new Error('Não foi possível carregar os scripts anteriores. Corrija o erro e tente novamente.')
     await Promise.all([...pendingSaves])
     for (const tab of [...tabs.value]) if (!await confirmChanges(tab)) return
@@ -147,6 +183,7 @@ async function submitName() {
 }
 async function confirmChanges(tab: Tab): Promise<boolean> {
   if (!dirty(tab)) return true
+  page.value = 'workspace'
   activeTabID.value = tab.id; changesTab.value = tab; changesError.value = ''
   const result = new Promise<boolean>(resolve => { changesResolve = resolve })
   await nextTick(); changesDialog.value?.showModal()
@@ -162,6 +199,7 @@ async function decideChanges(choice: 'save' | 'discard' | 'cancel') {
   const resolve = changesResolve; changesResolve = undefined; resolve?.(choice !== 'cancel')
 }
 async function showLibrary(profileID = '$all') {
+  page.value = 'workspace'
   if (closing.value || closeRequested.value) return
   libraryProfileID.value = profileID === '$all' || profileID === '$unlinked' || profiles.value.some(profile => profile.id === profileID) ? profileID : '$unlinked'
   libraryVersion.value++
@@ -251,6 +289,7 @@ function driverName(kind: Kind) { return drivers.value.find(d => d.kind === kind
 function connectionFor(profile: Profile) { return connections.value.find(c => c.profileID === profile.id) }
 async function refreshProfiles() { profiles.value = await api.Profiles() || [] }
 async function initialize() {
+  await loadSettings()
   globalBusy.value = true
   try { drivers.value = await api.Drivers(); await refreshProfiles() }
   catch (e) { announce(errorMessage(e), true) }
@@ -339,8 +378,9 @@ async function removeProfile() {
   finally { globalBusy.value = false }
 }
 function newTab(connection = selected.value) {
+  page.value = 'workspace'
   if (!connection) { void showLibrary(active.value?.profileID || '$all'); return }
-  const tab = reactive<Tab>({ id: nextID++, profileID: connection.profileID, anchor: 0, head: 0, sessionID: connection.sessionID, connectionName: connection.name, kind: connection.kind, title: 'Nova consulta', text: connection.kind === 'mongodb' ? '{\n  "find": "colecao",\n  "filter": {},\n  "limit": 100\n}' : '-- Escreva um comando SQL.\n', database: connection.database, page: 0, columns: [], busy: false, error: '', disconnected: !connection.sessionID })
+  const tab = reactive<Tab>({ id: nextID++, profileID: connection.profileID, anchor: 0, head: 0, sessionID: connection.sessionID, connectionName: connection.name, kind: connection.kind, title: 'Nova consulta', text: connection.kind === 'mongodb' ? '{\n  "find": "colecao",\n  "filter": {}\n}' : '-- Escreva um comando SQL.\n', database: connection.database, page: 0, columns: [], busy: false, error: '', disconnected: !connection.sessionID })
   tab.initialText = tab.text; tab.initialDatabase = tab.database
   tabs.value.push(tab); activeTabID.value = tab.id
 }
@@ -393,18 +433,20 @@ async function refreshProperties(tab: Tab, invalidate = false) {
 }
 async function previewTab(tab: Tab, page: number) {
   if (!tab.node || tab.propertiesView || tab.busy || tab.disconnected) return
+  const sessionID = tab.sessionID, limit = rowLimit(tab)
+  page = previewPage(tab, page, limit)
   tab.busy = true; tab.error = ''
   try {
-    const result = await api.Preview(tab.sessionID, { node: tab.node, page })
-    if (applyResult(tab, tab.sessionID, result)) {
+    const result = await api.Preview(sessionID, { node: tab.node, page, rowLimit: limit })
+    if (applyResult(tab, sessionID, result)) {
       tab.page = page
       if (!tab.columns.length) {
         try { tab.columns = await api.Describe(tab.sessionID, tab.node) || [] }
         catch { result.message = [result.message, 'Estrutura indisponível para esta conexão.'].filter(Boolean).join(' ') }
       }
     }
-  } catch (e) { if (!tab.disconnected) tab.error = errorMessage(e) }
-  finally { tab.busy = false }
+  } catch (e) { if (!tab.disconnected && tab.sessionID === sessionID) tab.error = errorMessage(e) }
+  finally { if (tab.sessionID === sessionID) tab.busy = false }
 }
 async function execute(text?: string) {
   const tab = active.value
@@ -412,17 +454,18 @@ async function execute(text?: string) {
   if (tab.propertiesView) return
   if (tab.node) { await previewTab(tab, tab.page); return }
   if (!text?.trim()) return
+  const sessionID = tab.sessionID, limit = rowLimit(tab)
   tab.busy = true; tab.error = ''
-  try { const result = await api.Execute(tab.sessionID, { text, database: tab.database }); invalidateMetadata(tab.sessionID); applyResult(tab, tab.sessionID, result) }
-  catch (e) { if (!tab.disconnected) tab.error = errorMessage(e) }
-  finally { tab.busy = false }
+  try { const result = await api.Execute(sessionID, { text, database: tab.database, rowLimit: limit }); invalidateMetadata(sessionID); applyResult(tab, sessionID, result) }
+  catch (e) { if (!tab.disconnected && tab.sessionID === sessionID) tab.error = errorMessage(e) }
+  finally { if (tab.sessionID === sessionID) tab.busy = false }
 }
 function selectedChanged() { const c = selected.value; if (c && !tabs.value.some(t => t.sessionID === c.sessionID && !t.disconnected)) newTab(c) }
 function keydown(event: KeyboardEvent) {
   const modalOpen = Array.from(document.querySelectorAll('dialog')).some(dialog => (dialog as HTMLDialogElement).open)
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
-    if (!modalOpen && active.value && !active.value.node && !closing.value && !closeRequested.value) void saveScript(active.value)
+    if (page.value === 'workspace' && !modalOpen && active.value && !active.value.node && !closing.value && !closeRequested.value) void saveScript(active.value)
     return
   }
   if (!modalOpen && event.altKey && event.key.toLowerCase() === 'n' && !dialog.value?.open && !deleteDialog.value?.open && !linkDialog.value?.open) { event.preventDefault(); void openForm() }
@@ -438,8 +481,8 @@ function startResize(event: PointerEvent) {
   const end = () => { separator.removeEventListener('pointermove', move); separator.removeEventListener('lostpointercapture', end); separator.removeEventListener('pointerup', end) }
   separator.addEventListener('pointermove', move); separator.addEventListener('pointerup', end); separator.addEventListener('lostpointercapture', end)
 }
-onMounted(() => { document.addEventListener('keydown', keydown); if (desktop.value) { unsubscribeClose = onWorkspaceClose(() => { void saveBeforeClose() }); initialization = initialize() } })
-onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); unsubscribeClose(); if (workspaceReady.value && !closing.value) void saver.flush().catch(() => {}); saver.dispose() })
+onMounted(() => { systemTheme.addEventListener('change', systemThemeChanged); document.addEventListener('keydown', keydown); if (desktop.value) { unsubscribeClose = onWorkspaceClose(() => { void saveBeforeClose() }); initialization = initialize() } })
+onBeforeUnmount(() => { systemTheme.removeEventListener('change', systemThemeChanged); settingsSaver.dispose(); document.removeEventListener('keydown', keydown); unsubscribeClose(); if (workspaceReady.value && !closing.value) void saver.flush().catch(() => {}); saver.dispose() })
 </script>
 
 <template>
@@ -470,6 +513,10 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); unsubs
     </aside>
 
     <main class="workspace">
+      <nav class="primary-tabs" aria-label="Navegação principal"><button :aria-current="page === 'workspace' ? 'page' : undefined" @click="page = 'workspace'">Workspace</button><button :aria-current="page === 'settings' ? 'page' : undefined" @click="page = 'settings'">Configurações</button></nav>
+      <SettingsView v-show="page === 'settings'" :settings="settings" :ready="settingsReady" :status="settingsStatus" :error="settingsError" @change="changeSettings" @retry="retrySettings" />
+      <section v-show="page === 'workspace'" class="workspace-panel" aria-label="Workspace">
+      <div v-if="settingsError" role="alert" class="banner danger"><span>{{ settingsError }}</span><button class="text-button" @click="page = 'settings'">Abrir configurações</button></div>
       <header class="workspace-header"><div class="workspace-heading"><span class="eyebrow">WORKSPACE</span><strong>{{ selected?.name || 'Seus dados, em um só lugar.' }}</strong></div><div class="session-controls"><button class="secondary" :disabled="!workspaceReady" @click="showLibrary()">Abrir script</button><label class="sr-only" for="session">Conexão ativa</label><select id="session" v-model="selectedSession" :disabled="!connections.length" @change="selectedChanged"><option v-if="!connections.length" value="">Sem conexão</option><option v-for="c in connections" :key="c.sessionID" :value="c.sessionID">{{ c.name }}</option></select><button v-if="selected" class="secondary" @click="disconnect(selected)">Desconectar</button></div></header>
       <div v-if="!desktop" class="banner">Prévia da interface. Abra o aplicativo Wails para conectar aos bancos.</div>
       <div v-if="notice" :role="noticeError ? 'alert' : 'status'" class="banner" :class="{ danger: noticeError }"><span>{{ notice }}</span><button class="icon-button" aria-label="Fechar mensagem" @click="notice = ''">×</button></div>
@@ -482,14 +529,15 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); unsubs
         <section v-else class="query-pane" :class="{ 'preview-pane': active.node }" :style="{ '--editor-size': `${editorPercent}%` }">
           <div v-if="!active.node" class="editor-section">
             <div class="editor-toolbar"><span class="section-label">{{ active.kind === 'mongodb' ? 'COMANDO EXTENDED JSON' : 'EDITOR SQL' }}</span><div class="editor-actions"><span role="status" class="muted">{{ scriptStatus(active) }}</span><button class="secondary" :disabled="!workspaceReady || active.saving || closeRequested" @click="saveScript(active)">Salvar <kbd>Ctrl S</kbd></button><button v-if="active.scriptID" class="text-button" :disabled="active.saving" @click="nameScript({ script: scripts.find(script => script.id === active!.scriptID) })">Renomear</button><label v-if="active.kind === 'mongodb'" class="compact-label">Banco<input v-model="active.database" placeholder="Nome do banco" :disabled="active.busy"></label><button class="primary execute" :disabled="active.busy || active.disconnected || !active.text.trim()" @pointerdown.prevent @click="editor?.executeCurrentCommand()"><span aria-hidden="true">▷</span>{{ active.busy ? 'Executando…' : 'Executar' }}<kbd>⌘ / Ctrl ↵</kbd></button></div></div>
-            <CodeEditor ref="editor" :key="active.id" v-model="active.text" :disabled="active.busy || closing" :connected="!active.disconnected" :sessionID="active.sessionID" :anchor="active.anchor" :head="active.head" :load-tables="loadTables" :load-columns="loadColumns" @properties="openProperties(active!, $event)" :dialect="active.kind" :language="active.kind === 'mongodb' ? 'json' : 'sql'" @cursor="Object.assign(active!, $event)" @completion-error="announce(errorMessage($event), true)" @execute="execute" />
+            <CodeEditor ref="editor" :key="active.id" v-model="active.text" :disabled="active.busy || closing" :connected="!active.disconnected" :sessionID="active.sessionID" :anchor="active.anchor" :head="active.head" :load-tables="loadTables" :load-columns="loadColumns" @properties="openProperties(active!, $event)" :dialect="active.kind" :dark="theme === 'dark'" :language="active.kind === 'mongodb' ? 'json' : 'sql'" @cursor="Object.assign(active!, $event)" @completion-error="announce(errorMessage($event), true)" @execute="execute" />
             <p v-if="active.scriptError" role="alert" class="script-save-error">{{ active.scriptError }}</p><div class="editor-hint">Separe comandos por linhas vazias. Ctrl+Enter executa o bloco. Ctrl+Espaço sugere nomes. Ctrl+clique abre propriedades.</div>
           </div>
           <div v-if="!active.node" class="resize-handle" role="separator" tabindex="0" aria-label="Redimensionar editor e resultados" aria-orientation="horizontal" :aria-valuenow="editorPercent" aria-valuemin="25" aria-valuemax="70" @pointerdown="startResize" @keydown="resizeKey"><span /></div>
           <section class="results-section" aria-label="Resultados">
-            <div class="result-toolbar"><div class="result-heading"><span class="section-label">{{ active.node ? active.title : 'RESULTADOS' }}</span><span v-if="active.result" class="result-count">{{ totalRows }} registros</span></div><div class="result-tools"><template v-if="active.node"><button class="text-button" :disabled="active.busy || active.disconnected || active.page === 0" @click="previewTab(active!, active!.page - 1)">← Anterior</button><span class="muted">Página {{ active.page + 1 }}</span><button class="text-button" :disabled="active.busy || active.disconnected || !active.result?.hasMore" @click="previewTab(active!, active!.page + 1)">Próxima →</button><button class="icon-button" aria-label="Atualizar dados" :disabled="active.busy || active.disconnected" @click="execute()">↻</button></template><span v-if="active.result" class="duration">{{ active.result.elapsedMS }} ms</span></div></div>
+            <div class="result-toolbar"><div class="result-heading"><span class="section-label">{{ active.node ? active.title : 'RESULTADOS' }}</span></div><div class="result-tools"><template v-if="active.node"><button class="text-button" :disabled="active.busy || active.disconnected || active.page === 0" @click="previewTab(active!, active!.page - 1)">← Anterior</button><span class="muted">Página {{ active.page + 1 }}</span><button class="text-button" :disabled="active.busy || active.disconnected || !active.result?.hasMore" @click="previewTab(active!, active!.page + 1)">Próxima →</button><button class="icon-button" aria-label="Atualizar dados" :disabled="active.busy || active.disconnected" @click="execute()">↻</button></template><span v-if="active.result" class="duration">{{ active.result.elapsedMS }} ms</span></div></div>
             <ResultView :result="active.result" :error="active.error" :busy="active.busy" :columns="active.columns" />
-            <div v-if="active.result?.truncated || active.result?.message" class="result-note" role="status">{{ active.result.truncated ? (active.node ? 'Há mais registros ou o limite de dados foi atingido. ' : 'Resultado truncado pelo limite de registros ou tamanho. ') : '' }}{{ active.result.message }}</div>
+            <ResultLimit :key="active.id" :result="active.result" :limit="rowLimit(active)" :defaultLimit="settings.maxRows" :overridden="active.rowLimit != null" :preview="!!active.node" :disabled="active.busy || closing" @change="active!.rowLimit = $event" @reset="active!.rowLimit = undefined" />
+            <div v-if="active.result?.truncated || active.result?.message" class="result-note" role="status">{{ resultNote(active.result) }}</div>
           </section>
         </section>
       </template>
@@ -502,6 +550,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); unsubs
         <div class="supported-databases"><span>PostgreSQL</span><span>Oracle</span><span>SQL Server</span><span>MongoDB</span><span>Ignite 2 / 3</span></div>
       </section>
       <footer class="status-bar"><span>{{ connections.length }} conexão(ões) ativa(s) <span aria-hidden="true">·</span> <span role="status" :class="{ danger: !!saveError }">Abas: {{ saveStatus }}</span></span><span>Credenciais no cofre do sistema</span><span>Go DB Viewer <span class="muted">0.1</span></span></footer>
+      </section>
     </main>
 
     <dialog ref="libraryDialog" class="connection-dialog script-library-dialog" aria-labelledby="script-library-title" @cancel.prevent="closeLibrary">

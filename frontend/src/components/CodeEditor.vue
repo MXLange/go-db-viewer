@@ -8,10 +8,10 @@ import { commandAtCursor } from '../commands.mjs'
 import { tableCompletionContext, tableCompletionOptions } from '../completions.mjs'
 import { columnCompletionContext, columnCompletionOptions, tableReferenceAt } from '../sql-context.mjs'
 import type { Column, TableReference, TableSuggestion } from '../api'
-const props = defineProps<{ modelValue: string; disabled: boolean; language: string; dialect?: string; connected?: boolean; sessionID?: string; anchor?: number; head?: number; loadTables?: (sessionID: string) => Promise<TableSuggestion[] | null>; loadColumns?: (sessionID: string, reference: TableReference) => Promise<Column[] | null> }>()
+const props = defineProps<{ modelValue: string; disabled: boolean; language: string; dark?: boolean; dialect?: string; connected?: boolean; sessionID?: string; anchor?: number; head?: number; loadTables?: (sessionID: string) => Promise<TableSuggestion[] | null>; loadColumns?: (sessionID: string, reference: TableReference) => Promise<Column[] | null> }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string]; execute: [text: string]; cursor: [selection: { anchor: number; head: number }]; completionError: [error: unknown]; properties: [event: { sessionID: string; reference: TableReference }] }>()
 const host = ref<HTMLDivElement>()
-const readOnly = new Compartment()
+const readOnly = new Compartment(), colors = new Compartment()
 let view: EditorView | undefined
 function executeCurrentCommand() {
   if (!view?.hasFocus || props.disabled || props.connected === false) return
@@ -40,6 +40,20 @@ async function completeTables(context: import('@codemirror/autocomplete').Comple
   } catch (error) { if (current()) emit('completionError', error); return null }
 }
 
+function editorColors(dark: boolean) {
+  return EditorView.theme({ '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--fg)' },
+        '.cm-scroller': { fontFamily: 'var(--font-mono)', fontSize: '13px', lineHeight: '1.8', overflow: 'auto' },
+        '.cm-content': { padding: '16px 0' }, '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--muted)', border: 'none', paddingRight: '12px' },
+        '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--surface)' },
+        '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, & > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
+        '.cm-content ::selection, .cm-content::selection': { color: 'var(--fg)' },
+        '.cm-selectionMatch, .cm-searchMatch, .cm-matchingBracket': { backgroundColor: 'var(--selection-match)' },
+        '.cm-searchMatch-selected': { outline: '1px solid var(--accent)' },
+        '.cm-cursor': { borderLeftColor: 'var(--accent)' }, '&.cm-focused': { outline: 'none' },
+        '.cm-tooltip-autocomplete': { backgroundColor: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)' },
+        '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--selection)', color: 'var(--success)' },
+      }, { dark })
+}
 onMounted(() => {
   view = new EditorView({ parent: host.value, state: EditorState.create({
     doc: props.modelValue,
@@ -71,21 +85,14 @@ onMounted(() => {
         }
         if (update.docChanged || update.selectionSet) { const { anchor, head } = update.state.selection.main; emit('cursor', { anchor, head }) }
       }),
-      EditorView.theme({ '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--fg)' },
-        '.cm-scroller': { fontFamily: 'var(--font-mono)', fontSize: '13px', lineHeight: '1.8', overflow: 'auto' },
-        '.cm-content': { padding: '16px 0' }, '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--muted)', border: 'none', paddingRight: '12px' },
-        '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--surface)' },
-        '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'var(--selection)' },
-        '.cm-cursor': { borderLeftColor: 'var(--accent)' }, '&.cm-focused': { outline: 'none' },
-        '.cm-tooltip-autocomplete': { backgroundColor: 'var(--surface)', color: 'var(--fg)', border: '1px solid var(--border)' },
-        '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--selection)', color: 'var(--success)' },
-      }, { dark: true }),
+      colors.of(Prec.highest(editorColors(Boolean(props.dark)))),
     ],
   }) })
 })
 watch(() => props.modelValue, value => {
   if (view && view.state.doc.toString() !== value) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
 })
+watch(() => props.dark, value => view?.dispatch({ effects: colors.reconfigure(Prec.highest(editorColors(Boolean(value)))) }))
 watch(() => props.disabled, value => view?.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(value)) }))
 watch(() => [props.sessionID, props.connected, props.disabled], () => { if (view) closeCompletion(view) })
 onBeforeUnmount(() => view?.destroy())

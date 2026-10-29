@@ -2,7 +2,7 @@
 
 Aplicativo desktop com Go, Wails v2 e Vue 3 para explorar bancos e executar comandos de leitura e escrita.
 
-O visual segue o AvocadoTerm: tema escuro, destaque verde-água e fonte Nunito local.
+O visual segue o AvocadoTerm: destaque verde-água, fonte Nunito local e temas claro, escuro ou conforme o sistema.
 
 ## Bancos e conexões
 
@@ -349,11 +349,44 @@ A validação também rejeita blocos procedurais e transações explícitas.
 Não há gerenciamento de transações entre abas. As operações usam autocommit.
 Para Oracle, o adaptador remove o ponto e vírgula final antes de enviar o comando ao driver.
 
-Resultados ficam limitados a 1.000 registros e 8 MiB. Células e documentos têm limite de 64 KiB.
-O aplicativo informa truncamento. A exploração automática usa páginas de 100 registros.
+O limite inicial é de 200 linhas/itens por consulta ou página de visualização.
+O aplicativo permite configurar valores entre 1 e 100.000.
+O limite de tamanho permanece em 8 MiB. Células e documentos têm limite de 64 KiB.
+O aplicativo informa quando o retorno é interrompido pela quantidade ou pelo tamanho.
 Se o limite de tamanho interromper uma página, use projeção ou filtros no editor para continuar sem saltar registros.
 Quando não houver chave primária disponível, a interface informa que a ordem pode variar.
 O separador dos painéis aceita arraste e setas do teclado.
+
+### Configurações, temas e máximo de resultados
+
+Use a aba **Configurações**, no topo do workspace, para alterar o tema e o máximo padrão de linhas/itens.
+As alterações válidas são salvas automaticamente. A tela informa falhas e permite tentar novamente.
+As configurações ficam em `settings.json`, no mesmo diretório de configuração da biblioteca de scripts.
+Se o arquivo estiver inválido, o aplicativo preserva uma cópia `.invalid-<id>` e carrega os valores padrão.
+
+Os temas disponíveis são **Claro**, **Escuro** e **Sistema**. O padrão inicial é **Sistema**.
+Nesse modo, a interface acompanha as mudanças do sistema operacional.
+A troca de tema preserva os textos, as seleções e os resultados das abas abertas.
+
+O padrão inicial de resultados é **200**. A configuração aceita inteiros entre **1** e **100.000**.
+O mesmo limite se aplica a consultas SQL, consultas MongoDB e páginas de visualização de tabelas ou coleções.
+O rodapé mostra a quantidade retornada e o limite usado, por exemplo, `37/200` ou `200/200 máx`.
+O indicador `máx` significa que a quantidade atingiu o limite; ele não informa quantos registros adicionais existem.
+Em comandos com múltiplos resultados, o contador considera o total da execução e o limite é compartilhado.
+Comandos de escrita sem retorno continuam mostrando as linhas afetadas ou a resposta do banco.
+
+No campo **Máximo nesta aba**, abaixo dos resultados, digite `1000` e confirme com Enter ou ao sair do campo.
+O campo também aceita colar `/1000`. A substituição vale somente para aquela aba, enquanto ela existir.
+Use **Usar padrão** para remover a substituição e acompanhar o valor das configurações.
+A biblioteca de scripts não salva essa substituição.
+
+Alterar o limite não executa nem repete o comando. O novo valor vale para a próxima execução.
+O contador do resultado atual conserva o limite usado anteriormente.
+Na visualização de tabelas, a próxima carga com um limite diferente reinicia na primeira página.
+Se o limite global mudar, as abas sem substituição usam o novo padrão na próxima execução.
+Limites menores definidos no SQL ou no comando MongoDB continuam sendo respeitados.
+Resultados grandes podem atingir o limite de tamanho antes da quantidade configurada.
+Os catálogos de tabelas e os demais metadados mantêm seus limites independentes.
 
 ### MongoDB
 

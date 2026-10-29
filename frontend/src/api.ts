@@ -6,8 +6,10 @@ export interface DBNode { name: string; kind: string; database: string; schema: 
 export interface Column { name: string; type: string; insertText?: string }
 export interface Cell { text: string; null: boolean; truncated: boolean }
 export interface ResultSet { columns: Column[]; rows: Cell[][] }
-export interface Result { sets: ResultSet[]; documents: string[]; affected: string; elapsedMS: number; truncated: boolean; hasMore: boolean; message: string }
-export interface Query { database: string; text: string }
+export interface Settings { theme: 'system' | 'light' | 'dark'; maxRows: number }
+export interface SettingsLoad { settings: Settings; warning: string }
+export interface Result { rowLimit: number; limitReason: string; sets: ResultSet[]; documents: string[]; affected: string; elapsedMS: number; truncated: boolean; hasMore: boolean; message: string }
+export interface Query { rowLimit?: number; database: string; text: string }
 export interface TableSuggestion { schema: string; name: string; insertText: string }
 export interface ScriptTab { scriptID?: string; initialText?: string; initialDatabase?: string; id: number; title: string; text: string; kind: Kind; profileID: string; connectionName: string; database: string; anchor: number; head: number }
 export interface SavedScript { id: string; title: string; text: string; kind: Kind; profileID: string; connectionName: string; database: string; updatedAt: string }
@@ -20,6 +22,8 @@ export interface TableReference { schema: string; name: string; schemaQuoted: bo
 export interface MetadataSection { status: 'available' | 'unavailable' | 'unsupported'; message: string; columns: string[]; rows: Cell[][] }
 export interface TableProperties { table: DBNode; columns: MetadataSection; primaryKey: MetadataSection; foreignKeys: MetadataSection; indexes: MetadataSection }
 interface Backend {
+  LoadSettings(): Promise<SettingsLoad>
+  SaveSettings(settings: Settings): Promise<Settings>
   ResolveTable(id: string, reference: TableReference): Promise<DBNode>
   GetTableProperties(id: string, node: DBNode): Promise<TableProperties>
   ListTables(id: string): Promise<TableSuggestion[]>
@@ -38,7 +42,7 @@ interface Backend {
   Disconnect(id: string): Promise<void>
   List(id: string, node: DBNode): Promise<DBNode[]>
   Describe(id: string, node: DBNode): Promise<Column[]>
-  Preview(id: string, req: { node: DBNode; page: number }): Promise<Result>
+  Preview(id: string, req: { node: DBNode; page: number; rowLimit?: number }): Promise<Result>
   Execute(id: string, query: Query): Promise<Result>
 }
 declare global { interface Window { go?: { main?: { App?: Backend } }; runtime?: { EventsOnMultiple(name: string, callback: () => void, count: number): () => void } } }

@@ -4,7 +4,7 @@
 
 Ferramenta desktop para desenvolvedores e administradores de bancos. A ação principal é conectar, explorar e executar comandos.
 
-Referência: `../avocadoterm`. Preservar Nunito, fundo azul-escuro e destaque verde-água.
+Referência: `../avocadoterm`. Preservar Nunito e destaque verde-água. O tema escuro mantém fundo azul-escuro; o tema claro usa superfícies neutras.
 
 Direção escolhida: workspace técnico compacto. Adjetivos: técnico, compacto, preciso e consistente.
 
@@ -33,7 +33,7 @@ Tokens CSS em `frontend/src/style.css`. Cada cor possui fallback hexadecimal e d
 | Borda | `--border` | #334155 | 37.2% .044 257.3 |
 | Destaque | `--accent` | #14b8a6 | 70.4% .14 182.5 |
 | Texto no destaque | `--accent-fg` | #05201d | 22% .035 181 |
-| Seleção | `--selection` | #12313d | 29% .04 226 |
+| Seleção | `--selection` | #23404a | 35% .04 222 |
 | Sucesso | `--success` | #5eead4 | 85.5% .138 181 |
 | Aviso | `--warning` | #fde68a | 92.4% .12 95.7 |
 | Erro | `--error` | #fca5a5 | 80.8% .114 19.5 |
@@ -97,3 +97,41 @@ A lista usa linhas com nome, conexão e data. Ações auxiliares usam botões de
 Estados de gravação incluem texto e marcador na aba. Dialogs mantêm labels e erros junto aos controles.
 Auditoria de código: sem novas imagens, cores ou sombras; novos controles usam os tokens existentes.
 A auditoria visual e o contraste calculado permanecem pendentes: o sandbox bloqueou a inicialização do Chrome.
+
+
+## Temas e configurações
+
+A navegação principal apresenta Workspace e Configurações acima do conteúdo. A troca preserva as abas abertas.
+O tema padrão segue o sistema. Claro e Escuro são escolhas persistentes em `settings.json`.
+O tema claro mantém Nunito, monoespaçada, escala 1,2 e destaque verde-água. Superfícies claras usam texto azul-escuro.
+Ambos os temas usam os mesmos tokens semânticos. `color-scheme` acompanha o tema efetivo nos controles nativos.
+
+| Papel | Token | Claro: fallback | Claro: OKLCH |
+|---|---|---|---|
+| Fundo | `--bg` | #f6f8fa | 97.8% .004 248 |
+| Superfície | `--surface` | #ffffff | 100% 0 0 |
+| Controle | `--raised` | #eaf0f3 | 95% .009 232 |
+| Texto | `--fg` | #20303a | 30% .024 239 |
+| Secundário | `--muted` | #536774 | 50% .027 237 |
+| Borda | `--border` | #81949f | 65% .025 237 |
+| Destaque | `--accent` | #087e73 | 53% .09 183 |
+| Texto no destaque | `--accent-fg` | #ffffff | 100% 0 0 |
+| Seleção | `--selection` | #c5dfdf | 88% .028 195 |
+| Ocorrência correspondente | `--selection-match` | #e1eeee | 94% .015 195 |
+| Sucesso | `--success` | #066c5f | 47% .08 179 |
+| Aviso | `--warning` | #815400 | 48% .1 74 |
+| Erro | `--error` | #b42335 | 49% .17 19 |
+
+No tema escuro, a seleção usa #23404a / OKLCH 35% .04 222.
+Ocorrências correspondentes usam #1b333d / OKLCH 30% .03 222.
+O CodeMirror configura a camada de seleção com precedência suficiente para impedir o destaque claro padrão.
+A troca de tema reconfigura somente o tema do editor, preservando documento e seleção.
+
+O rodapé dos resultados mostra quantidade/limite e permite alterar o máximo da aba.
+Estados incluem limite padrão, substituição temporária, valor inválido, tamanho excedido e alteração pendente da próxima execução.
+A tela de configurações apresenta labels, validação local, status de gravação e ação para repetir após erro.
+Não há execução automática ao editar limites.
+
+2026-10-29: revisão dos tokens e estados realizada em código. Contrastes teóricos dos tokens OKLCH: texto claro 12,75:1; secundário claro 5,96:1; seleção clara 9,56:1; botão primário claro 5,04:1; seleção escura 9,03:1.
+Esses cálculos não substituem a validação do resultado renderizado.
+A execução visual no Chrome foi bloqueada pelo sandbox. Não declarar conformidade de acessibilidade com base apenas na revisão estática.
